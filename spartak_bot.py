@@ -33,7 +33,7 @@ HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
 }
 
-TEXT_LIMIT = 450
+TEXT_LIMIT = 3500  # Telegram лимит 4096, оставляем запас на заголовок и футер
 
 
 def is_spartak_related(text):
