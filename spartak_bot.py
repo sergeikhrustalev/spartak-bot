@@ -20,23 +20,18 @@ SPARTAK_KEYWORDS = [
 SOURCES = [
     {
         'name': 'Чемпионат',
-        'url': 'https://www.championat.com/rss/article/spartak/',
-        'filter': False,
-    },
-    {
-        'name': 'Чемпионат',
         'url': 'https://www.championat.com/rss/news/',
-        'filter': True,
-    },
-    {
-        'name': 'Спорт-Экспресс',
-        'url': 'https://www.sport-express.ru/company/rss/',
         'filter': True,
     },
     {
         'name': 'ТАСС',
         'url': 'https://tass.ru/rss/v2.xml',
         'filter': True,
+    },
+    {
+        'name': 'Google Новости',
+        'url': 'https://news.google.com/rss/search?q=%D0%A1%D0%BF%D0%B0%D1%80%D1%82%D0%B0%D0%BA+%D0%9C%D0%BE%D1%81%D0%BA%D0%B2%D0%B0&hl=ru&gl=RU&ceid=RU:ru',
+        'filter': False,
     },
 ]
 
