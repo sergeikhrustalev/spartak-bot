@@ -26,9 +26,14 @@ SOURCES = [
         'filter': True,
     },
     {
-        'name': 'ТАСС',
-        'url': 'https://tass.ru/rss/v2.xml',
+        'name': 'Спорт-Экспресс',
+        'url': 'https://www.sport-express.ru/company/rss/',
         'filter': True,
+    },
+    {
+        'name': 'Фанат1к',
+        'url': 'https://fanat1k.ru/feed/',
+        'filter': False,
     },
 ]
 
