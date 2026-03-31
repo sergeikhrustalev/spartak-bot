@@ -5,7 +5,10 @@ import hashlib
 import json
 import time
 import re
+import socket
 from datetime import datetime, timezone, timedelta
+
+socket.setdefaulttimeout(10)
 
 BOT_TOKEN = os.environ['BOT_TOKEN']
 CHANNEL = '@bozhespartakhranii'
