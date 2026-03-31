@@ -33,15 +33,61 @@ HEADERS = {
     'User-Agent': 'Mozilla/5.0 (compatible; SpartakNewsBot/1.0)'
 }
 
+# Маппинг доменов в читаемые названия (чтобы Telegram не делал их кликабельными ссылками)
+DOMAIN_MAP = {
+    'championat.ru': 'Чемпионат',
+    'championat.com': 'Чемпионат',
+    'sport-express.ru': 'Спорт-Экспресс',
+    'sports.ru': 'Sports.ru',
+    'tass.ru': 'ТАСС',
+    'ria.ru': 'РИА Новости',
+    'rsport.ria.ru': 'РИА Спорт',
+    'sport24.ru': 'Sport24',
+    'soccer.ru': 'Soccer.ru',
+    'bombardir.ru': 'Bombardir',
+    'sovsport.ru': 'Советский Спорт',
+    'matchtv.ru': 'Матч ТВ',
+    'gazeta.ru': 'Газета.ру',
+    'rbc.ru': 'РБК',
+    'interfax.ru': 'Интерфакс',
+    'lenta.ru': 'Лента.ру',
+    'kommersant.ru': 'Коммерсантъ',
+    'iz.ru': 'Известия',
+    'mk.ru': 'МК',
+    'euro-football.ru': 'Евро-Футбол',
+    'football.ru': 'Football.ru',
+    'rusfootball.info': 'Рус. Футбол',
+    'spartak.com': 'Спартак офиц.',
+    'fanat1k.ru': 'Фанат1к',
+    'bombardir.ru': 'Bombardir',
+    'transfermarkt.ru': 'Transfermarkt',
+}
+
+
+def clean_source_name(raw):
+    """Converts 'championat.ru' → 'Чемпионат', leaves 'Евро-Футбол' as is."""
+    raw = raw.strip()
+    raw_lower = raw.lower()
+    # Direct match
+    if raw_lower in DOMAIN_MAP:
+        return DOMAIN_MAP[raw_lower]
+    # Partial match
+    for domain, name in DOMAIN_MAP.items():
+        if domain in raw_lower:
+            return name
+    # Looks like a domain (no spaces, has dot) — strip TLD
+    if '.' in raw and ' ' not in raw:
+        return raw.split('.')[0].capitalize()
+    return raw
+
 
 def is_spartak_related(text):
     return any(kw in text.lower() for kw in SPARTAK_KEYWORDS)
 
 
 def clean_text(text):
-    # Remove HTML tags
+    """Strip HTML tags and decode HTML entities."""
     text = re.sub(r'<[^>]+>', '', text)
-    # Decode HTML entities
     text = text.replace('&nbsp;', ' ')
     text = text.replace('&amp;', '&')
     text = text.replace('&lt;', '<')
@@ -50,24 +96,30 @@ def clean_text(text):
     text = text.replace('&#39;', "'")
     text = text.replace('&laquo;', '«')
     text = text.replace('&raquo;', '»')
-    # Collapse whitespace
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
 
 def parse_google_title(raw_title):
     """
-    Google News titles look like: 'Article text - source.ru'
+    Google News titles: 'Текст статьи - Источник'
     Returns: (clean_title, source_name)
     """
+    # Split on last ' - ' to separate source
     parts = raw_title.rsplit(' - ', 1)
     if len(parts) == 2:
-        return parts[0].strip(), parts[1].strip()
+        title = parts[0].strip()
+        source = clean_source_name(parts[1].strip())
+        return title, source
     return raw_title.strip(), 'Новости'
 
 
 def format_post(title, source_name, pub_dt):
-    time_str = pub_dt.strftime('%H:%M') if pub_dt else ''
+    """Format a clean Telegram post. No description, no links."""
+    msk = timezone(timedelta(hours=3))
+    time_str = pub_dt.astimezone(msk).strftime('%H:%M') if pub_dt else ''
+    # Escape < > & in title to avoid breaking HTML parse_mode
+    title = title.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
     text = f'🔴⚪️ <b>{title}</b>'
     text += f'\n\n📰 {source_name}'
     if time_str:
@@ -129,7 +181,6 @@ def main():
                 if article_id in posted:
                     continue
 
-                # Parse publication time
                 pub = entry.get('published_parsed')
                 if pub:
                     try:
@@ -147,7 +198,6 @@ def main():
                 else:
                     title = clean_text(raw_title)
                     source_name = source['name']
-                    # Filter by keyword for non-Google sources
                     summary = entry.get('summary', entry.get('description', ''))
                     if not is_spartak_related(title + ' ' + summary):
                         continue
@@ -157,24 +207,21 @@ def main():
                     'title': title,
                     'source': source_name,
                     'pub_dt': pub_dt,
-                    'url': url,
                 })
 
         except Exception as e:
             print(f'Error fetching {source["name"]}: {e}')
 
-    # Deduplicate by title similarity
+    # Deduplicate by normalised title
     seen_titles = set()
     unique_articles = []
     for a in new_articles:
-        title_key = re.sub(r'\W+', '', a['title'].lower())[:50]
-        if title_key not in seen_titles:
-            seen_titles.add(title_key)
+        key = re.sub(r'\W+', '', a['title'].lower())[:50]
+        if key not in seen_titles:
+            seen_titles.add(key)
             unique_articles.append(a)
 
-    # Sort oldest first
     unique_articles.sort(key=lambda x: x['pub_dt'])
-
     to_post = unique_articles[:4]
 
     if not to_post:
@@ -182,7 +229,6 @@ def main():
         save_posted(posted)
         return
 
-    # Spread posts evenly over 28 minutes
     WINDOW = 28 * 60
     interval = WINDOW / (len(to_post) - 1) if len(to_post) > 1 else 0
 
