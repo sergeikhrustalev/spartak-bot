@@ -3,7 +3,7 @@ name: Spartak News Bot
 on:
   schedule:
     # Every 2 hours (UTC). In Moscow time: +3h offset.
-    - cron: '0 */2 * * *'
+    - cron: '*/30 * * * *'
   workflow_dispatch: # Allow manual run from GitHub UI
 
 jobs:

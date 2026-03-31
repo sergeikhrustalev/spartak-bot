@@ -157,7 +157,7 @@ def main():
     unique_articles.sort(key=lambda x: x['pub_dt'])
 
     posted_count = 0
-    for article in unique_articles[:5]:
+    for article in unique_articles[:2]:
         text = format_post(
             article['title'],
             article['summary'],
