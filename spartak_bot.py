@@ -34,9 +34,9 @@ SOURCES = [
         'filter': True,
     },
     {
-        'name': 'Фанат1к',
-        'url': 'https://fanat1k.ru/feed/',
-        'filter': False,
+        'name': 'ТАСС',
+        'url': 'https://tass.ru/rss/v2.xml',
+        'filter': True,
     },
 ]
 
