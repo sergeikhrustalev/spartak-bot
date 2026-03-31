@@ -156,8 +156,25 @@ def main():
 
     unique_articles.sort(key=lambda x: x['pub_dt'])
 
+    to_post = unique_articles[:4]
+
+    if not to_post:
+        print('No new Spartak articles found.')
+        save_posted(posted)
+        return
+
+    # Spread posts evenly over 28 minutes
+    # 1 article → post immediately
+    # N articles → interval = 28min / (N-1) between each
+    WINDOW = 28 * 60  # seconds
+    interval = WINDOW / (len(to_post) - 1) if len(to_post) > 1 else 0
+
     posted_count = 0
-    for article in unique_articles[:2]:
+    for i, article in enumerate(to_post):
+        if i > 0:
+            print(f'Waiting {int(interval)} sec before next post...')
+            time.sleep(interval)
+
         text = format_post(
             article['title'],
             article['summary'],
@@ -168,10 +185,8 @@ def main():
             posted.add(article['id'])
             posted_count += 1
             print(f'Posted: {article["title"]}')
-            time.sleep(3)
 
-    if posted_count == 0:
-        print('No new Spartak articles found.')
+    print(f'Done. Posted {posted_count} articles.')
 
     save_posted(posted)
 
