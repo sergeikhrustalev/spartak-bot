@@ -1,0 +1,117 @@
+{
+  "name": "Spartak Moscow News Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 2
+            }
+          ]
+        }
+      },
+      "id": "node-schedule-001",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://www.championat.com/rss/news/"
+      },
+      "id": "node-rss-championat-002",
+      "name": "RSS Чемпионат",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [480, 180]
+    },
+    {
+      "parameters": {
+        "url": "https://tass.ru/rss/v2.xml"
+      },
+      "id": "node-rss-tass-003",
+      "name": "RSS ТАСС",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [480, 420]
+    },
+    {
+      "parameters": {
+        "mode": "append"
+      },
+      "id": "node-merge-004",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const KEYWORDS = ['спартак', 'spartak', 'красно-белые'];\nconst CUTOFF_HOURS = 72;\nconst MAX_POSTS = 5;\n\nconst cutoff = new Date(Date.now() - CUTOFF_HOURS * 60 * 60 * 1000);\n\nfunction getSource(link) {\n  if ((link || '').includes('championat')) return 'Чемпионат';\n  if ((link || '').includes('tass')) return 'ТАСС';\n  return 'Новости';\n}\n\nconst items = $input.all();\nconst filtered = [];\n\nfor (const item of items) {\n  const title = item.json.title || '';\n  const content = item.json.contentSnippet || item.json.content || item.json.summary || '';\n  const combined = (title + ' ' + content).toLowerCase();\n\n  if (!KEYWORDS.some(kw => combined.includes(kw))) continue;\n\n  const pubDate = item.json.isoDate\n    ? new Date(item.json.isoDate)\n    : item.json.pubDate\n      ? new Date(item.json.pubDate)\n      : new Date();\n\n  if (pubDate < cutoff) continue;\n\n  filtered.push({\n    title,\n    link: item.json.link || item.json.guid || '',\n    content,\n    pubDate,\n    sourceName: getSource(item.json.link),\n  });\n}\n\nconst seen = new Set();\nconst unique = filtered.filter(a => {\n  const key = (a.link || a.title).substring(0, 80);\n  if (seen.has(key)) return false;\n  seen.add(key);\n  return true;\n});\n\nunique.sort((a, b) => a.pubDate - b.pubDate);\nconst toPost = unique.slice(0, MAX_POSTS);\n\nif (toPost.length === 0) return [];\n\nreturn toPost.map(a => {\n  const timeStr = a.pubDate.toLocaleTimeString('ru-RU', {\n    hour: '2-digit',\n    minute: '2-digit',\n    timeZone: 'Europe/Moscow',\n  });\n\n  const desc = a.content\n    .replace(/<[^>]+>/g, '')\n    .replace(/\\s+/g, ' ')\n    .trim()\n    .substring(0, 500);\n\n  let text = `🔴⚪️ <b>${a.title}</b>`;\n  if (desc) text += `\\n\\n${desc}`;\n  text += `\\n\\n📰 ${a.sourceName} | 🕐 ${timeStr} МСК`;\n\n  return { json: { text } };\n});\n"
+      },
+      "id": "node-code-005",
+      "name": "Filter and Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "@bozhespartakhranii",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "disable_web_page_preview": false
+        }
+      },
+      "id": "node-telegram-006",
+      "name": "Send to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1200, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Spartak Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {"node": "RSS Чемпионат", "type": "main", "index": 0},
+          {"node": "RSS ТАСС", "type": "main", "index": 0}
+        ]
+      ]
+    },
+    "RSS Чемпионат": {
+      "main": [
+        [{"node": "Merge", "type": "main", "index": 0}]
+      ]
+    },
+    "RSS ТАСС": {
+      "main": [
+        [{"node": "Merge", "type": "main", "index": 1}]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [{"node": "Filter and Format", "type": "main", "index": 0}]
+      ]
+    },
+    "Filter and Format": {
+      "main": [
+        [{"node": "Send to Telegram", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
