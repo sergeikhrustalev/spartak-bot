@@ -1,6 +1,8 @@
 name: MAX Spartak Bot
 
 on:
+  schedule:
+    - cron: '*/10 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -8,6 +10,9 @@ permissions:
 
 jobs:
   post-news:
+    concurrency:
+      group: spartak-max-posting
+      cancel-in-progress: false
     runs-on: ubuntu-latest
 
     steps:
@@ -25,12 +30,12 @@ jobs:
       - name: Run MAX bot
         env:
           ACCESS_TOKEN: ${{ secrets.MAX_ACCESS_TOKEN }}
-        run: python max_spartak_bot.py
+        run: python max_spartak_bot.py run
 
-      - name: Save posted articles list
+      - name: Save bot state
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add posted_max.json
+          git add posted_max.json queue_max.json
           git diff --staged --quiet || git commit -m "Update MAX posted articles"
           git push

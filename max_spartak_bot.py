@@ -1,116 +1,120 @@
+import argparse
+import hashlib
+import json
+import os
+import re
+import socket
+from datetime import datetime, timedelta, timezone
+
 import feedparser
 import requests
 import trafilatura
-import os
-import hashlib
-import json
-import time
-import re
-import socket
-from datetime import datetime, timezone, timedelta
 
 socket.setdefaulttimeout(15)
 
-ACCESS_TOKEN = os.environ['ACCESS_TOKEN']
-CHAT_ID = int(os.environ.get('CHAT_ID', '-72873687632407'))
+ACCESS_TOKEN = os.environ.get("ACCESS_TOKEN")
+CHAT_ID = int(os.environ.get("CHAT_ID", "-72873687632407"))
 
-MAX_API = 'https://botapi.max.ru'
+MAX_API = "https://botapi.max.ru"
 
 SOURCES = [
-    {
-        'name': 'Чемпионат',
-        'url': 'https://www.championat.com/rss/news/',
-        'filter': True,
-    },
-    {
-        'name': 'Чемпионат',
-        'url': 'https://www.championat.com/rss/article/spartak/',
-        'filter': False,
-    },
+    {"name": "Чемпионат", "url": "https://www.championat.com/rss/news/", "filter": True},
+    {"name": "Чемпионат", "url": "https://www.championat.com/rss/article/spartak/", "filter": False},
 ]
 
-SPARTAK_KEYWORDS = ['спартак', 'spartak', 'красно-белые']
+SPARTAK_KEYWORDS = ["спартак", "spartak", "красно-белые"]
 
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 }
 
 TEXT_LIMIT = 3500
+QUEUE_FILE = "queue_max.json"
+POSTED_FILE = "posted_max.json"
+MAX_QUEUE_SIZE = 120
+DEFAULT_CUTOFF_HOURS = 26
 
 
 def is_spartak_related(text):
-    return any(kw in text.lower() for kw in SPARTAK_KEYWORDS)
+    return any(keyword in text.lower() for keyword in SPARTAK_KEYWORDS)
 
 
 def clean_text(text):
-    text = re.sub(r'<[^>]+>', '', text)
-    text = text.replace('&nbsp;', ' ').replace('&amp;', '&')
-    text = text.replace('&lt;', '<').replace('&gt;', '>')
-    text = text.replace('&quot;', '"').replace('&#39;', "'")
-    text = text.replace('&laquo;', '«').replace('&raquo;', '»')
-    text = re.sub(r'\s+', ' ', text).strip()
+    text = re.sub(r"<[^>]+>", "", text)
+    text = text.replace("&nbsp;", " ").replace("&amp;", "&")
+    text = text.replace("&lt;", "<").replace("&gt;", ">")
+    text = text.replace("&quot;", '"').replace("&#39;", "'")
+    text = text.replace("&laquo;", "«").replace("&raquo;", "»")
+    text = re.sub(r"\s+", " ", text).strip()
     return text
 
 
 def fetch_article_text(url):
     try:
-        r = requests.get(url, timeout=12, headers=HEADERS)
-        if not r.ok:
-            return ''
+        response = requests.get(url, timeout=12, headers=HEADERS)
+        if not response.ok:
+            return ""
         text = trafilatura.extract(
-            r.text,
+            response.text,
             include_comments=False,
             include_tables=False,
             no_fallback=False,
         )
         if not text:
-            return ''
+            return ""
         if len(text) > TEXT_LIMIT:
             chunk = text[:TEXT_LIMIT]
-            last_dot = chunk.rfind('.')
-            if last_dot > TEXT_LIMIT // 2:
-                chunk = chunk[:last_dot + 1]
-            else:
-                chunk = chunk.rstrip() + '...'
-            return chunk
+            last_dot = chunk.rfind(".")
+            text = chunk[: last_dot + 1] if last_dot > TEXT_LIMIT // 2 else chunk.rstrip() + "..."
         return text
-    except Exception as e:
-        print(f'Text fetch error for {url}: {e}')
-        return ''
+    except Exception as exc:
+        print(f"Text fetch error for {url}: {exc}")
+        return ""
 
 
-def format_post(title, body, source_name, pub_dt):
+def parse_dt(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def format_post(article):
+    pub_dt = parse_dt(article.get("pub_dt"))
     msk = timezone(timedelta(hours=3))
-    time_str = pub_dt.astimezone(msk).strftime('%H:%M') if pub_dt else ''
-    text = f'🔴⚪️ {title}'
-    if body:
-        text += f'\n\n{body}'
-    text += f'\n\n📰 {source_name}'
+    time_str = pub_dt.astimezone(msk).strftime("%H:%M") if pub_dt else ""
+    text = f"🔴⚪️ {article.get('title', '')}"
+    if article.get("body"):
+        text += f"\n\n{article['body']}"
+    text += f"\n\n📰 {article.get('source', 'Чемпионат')}"
     if time_str:
-        text += f' | 🕐 {time_str} МСК'
+        text += f" | 🕐 {time_str} МСК"
     return text
 
 
-def send_message(text, chat_id):
-    import json as _json
+def send_message(text):
+    if not ACCESS_TOKEN:
+        raise RuntimeError("ACCESS_TOKEN is not set")
     try:
-        resp = requests.post(
-            f'{MAX_API}/messages',
-            params={'chat_id': chat_id},
-            data=_json.dumps({'text': text}).encode('utf-8'),
+        response = requests.post(
+            f"{MAX_API}/messages",
+            params={"chat_id": CHAT_ID},
+            data=json.dumps({"text": text}).encode("utf-8"),
             headers={
-                'Authorization': ACCESS_TOKEN,
-                'Content-Type': 'application/json',
+                "Authorization": ACCESS_TOKEN,
+                "Content-Type": "application/json",
             },
             timeout=15,
         )
-        if not resp.ok:
-            print(f'MAX API error: {resp.status_code} {resp.text}')
-        else:
-            print(f'MAX API ok')
-        return resp.ok
-    except Exception as e:
-        print(f'Send error: {e}')
+        if not response.ok:
+            print(f"MAX API error: {response.status_code} {response.text}")
+        return response.ok
+    except Exception as exc:
+        print(f"Send error: {exc}")
         return False
 
 
@@ -118,51 +122,78 @@ def get_article_id(url):
     return hashlib.md5(url.encode()).hexdigest()
 
 
+def load_json_file(path, default):
+    if not os.path.exists(path):
+        return default
+    with open(path) as file_obj:
+        return json.load(file_obj)
+
+
+def save_json_file(path, payload):
+    with open(path, "w") as file_obj:
+        json.dump(payload, file_obj, ensure_ascii=False, indent=2)
+
+
 def load_posted():
-    fname = 'posted_max.json'
-    if os.path.exists(fname):
-        with open(fname) as f:
-            return set(json.load(f))
-    return set()
+    return set(load_json_file(POSTED_FILE, []))
 
 
 def save_posted(posted):
-    with open('posted_max.json', 'w') as f:
-        json.dump(list(posted), f)
+    save_json_file(POSTED_FILE, sorted(posted))
 
 
-def main():
-    chat_id = CHAT_ID
+def load_queue():
+    queue = load_json_file(QUEUE_FILE, [])
+    queue.sort(key=lambda item: item.get("pub_dt", ""))
+    return queue
+
+
+def save_queue(queue):
+    save_json_file(QUEUE_FILE, queue[:MAX_QUEUE_SIZE])
+
+
+def normalize_title(title):
+    return re.sub(r"\W+", "", title.lower())[:80]
+
+
+def fetch_feed(url):
+    response = requests.get(url, headers=HEADERS, timeout=20)
+    response.raise_for_status()
+    return feedparser.parse(response.content)
+
+
+def collect_articles(cutoff_hours=DEFAULT_CUTOFF_HOURS):
     posted = load_posted()
+    queue = load_queue()
+    queued_ids = {item["id"] for item in queue}
+    queued_titles = {normalize_title(item["title"]) for item in queue}
     now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(hours=26)
-
-    new_articles = []
+    cutoff = now - timedelta(hours=cutoff_hours)
+    collected = []
 
     for source in SOURCES:
         try:
-            feed = feedparser.parse(source['url'], request_headers=HEADERS)
+            feed = fetch_feed(source["url"])
             if feed.bozo and not feed.entries:
-                print(f'Feed error {source["name"]}: {feed.bozo_exception}')
+                print(f"Feed error {source['name']}: {feed.bozo_exception}")
                 continue
 
             for entry in feed.entries:
-                title = clean_text(entry.get('title', '').strip())
-                url = entry.get('link', '').strip()
-                summary = entry.get('summary', entry.get('description', ''))
-
+                title = clean_text(entry.get("title", "").strip())
+                url = entry.get("link", "").strip()
+                summary = entry.get("summary", entry.get("description", ""))
                 if not title or not url:
                     continue
 
-                article_id = get_article_id(url)
-                if article_id in posted:
+                if source["filter"] and not is_spartak_related(title + " " + summary):
                     continue
 
-                if source['filter']:
-                    if not is_spartak_related(title + ' ' + summary):
-                        continue
+                article_id = get_article_id(url)
+                title_key = normalize_title(title)
+                if article_id in posted or article_id in queued_ids or title_key in queued_titles:
+                    continue
 
-                pub = entry.get('published_parsed')
+                pub = entry.get("published_parsed")
                 if pub:
                     try:
                         pub_dt = datetime(*pub[:6], tzinfo=timezone.utc)
@@ -174,51 +205,70 @@ def main():
                 if pub_dt < cutoff:
                     continue
 
-                new_articles.append({
-                    'id': article_id,
-                    'title': title,
-                    'url': url,
-                    'source': source['name'],
-                    'pub_dt': pub_dt,
-                })
+                collected.append(
+                    {
+                        "id": article_id,
+                        "title": title,
+                        "url": url,
+                        "source": source["name"],
+                        "pub_dt": pub_dt.isoformat(),
+                    }
+                )
+                queued_ids.add(article_id)
+                queued_titles.add(title_key)
+        except Exception as exc:
+            print(f"Error fetching {source['name']}: {exc}")
 
-        except Exception as e:
-            print(f'Error fetching {source["name"]}: {e}')
+    collected.sort(key=lambda item: item["pub_dt"])
+    queue.extend(collected)
+    queue.sort(key=lambda item: item["pub_dt"])
+    queue = queue[:MAX_QUEUE_SIZE]
+    save_queue(queue)
 
-    seen_titles = set()
-    unique_articles = []
-    for a in new_articles:
-        key = re.sub(r'\W+', '', a['title'].lower())[:50]
-        if key not in seen_titles:
-            seen_titles.add(key)
-            unique_articles.append(a)
+    print(
+        f"Collect done. Added {len(collected)} items. "
+        f"Queue length: {len(queue)}. Posted total: {len(posted)}."
+    )
 
-    unique_articles.sort(key=lambda x: x['pub_dt'])
-    to_post = unique_articles[:4]
 
-    if not to_post:
-        print('No new Spartak articles found.')
-        save_posted(posted)
+def send_one():
+    posted = load_posted()
+    queue = load_queue()
+
+    if not queue:
+        print("Queue is empty. Nothing to send.")
         return
 
-    WINDOW = 28 * 60
-    interval = WINDOW / (len(to_post) - 1) if len(to_post) > 1 else 0
+    article = queue[0]
+    article["body"] = fetch_article_text(article["url"])
+    if not send_message(format_post(article)):
+        print(f"Send failed, item left in queue: {article['title']}")
+        return
 
-    posted_count = 0
-    for i, article in enumerate(to_post):
-        if i > 0:
-            time.sleep(interval)
-
-        body = fetch_article_text(article['url'])
-        text = format_post(article['title'], body, article['source'], article['pub_dt'])
-        if send_message(text, chat_id):
-            posted.add(article['id'])
-            posted_count += 1
-            print(f'Posted: {article["title"]}')
-
-    print(f'Done. Posted {posted_count} articles.')
+    posted.add(article["id"])
+    queue = queue[1:]
     save_posted(posted)
+    save_queue(queue)
+    print(f"Sent: {article['title']}")
+    print(f"Queue left: {len(queue)}. Posted total: {len(posted)}.")
 
 
-if __name__ == '__main__':
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "mode",
+        nargs="?",
+        default="run",
+        choices=["run", "collect", "send-one"],
+        help="run = collect + send one item, collect = only collect, send-one = only send",
+    )
+    args = parser.parse_args()
+
+    if args.mode in {"run", "collect"}:
+        collect_articles()
+    if args.mode in {"run", "send-one"}:
+        send_one()
+
+
+if __name__ == "__main__":
     main()
